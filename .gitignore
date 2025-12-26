@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.DS_Store
+
+# If you create local Streamlit secrets, don't commit them:
+.streamlit/secrets.toml

@@ -1,25 +1,28 @@
-# 📦 Streamlit App Starter Kit 
+# M-Saleh Chatbot Model 🤖
+
+Streamlit multi-chat chatbot with optional image input (vision) using Groq LLMs.
+
+## Run locally
+
+1) Install dependencies:
+```bash
+pip install -r requirements.txt
 ```
-⬆️ (Replace above with your app's name)
+
+2) Create `.env` (DO NOT push to GitHub):
+```env
+GROQ_API_KEY=your_groq_api_key_here
 ```
 
-Description of the app ...
+3) Start the app:
+```bash
+streamlit run streamlit_app.py
+```
 
-## Demo App
+## Deploy (Streamlit Community Cloud)
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://app-starter-kit.streamlit.app/)
-
-## GitHub Codespaces
-
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/streamlit/app-starter-kit?quickstart=1)
-
-## Section Heading
-
-This is filler text, please replace this with text for this section.
-
-## Further Reading
-
-This is filler text, please replace this with a explanatory text about further relevant resources for this repo
-- Resource 1
-- Resource 2
-- Resource 3
+1) Create the app from this repo.
+2) In the app settings → **Secrets**, add:
+```toml
+GROQ_API_KEY="your_groq_api_key_here"
+```
