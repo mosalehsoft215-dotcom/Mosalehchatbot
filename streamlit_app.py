@@ -1,321 +1,154 @@
 import streamlit as st
 import base64
-import io
-import os
-from PIL import Image
 from groq import Groq
 from datetime import datetime
+import os
 from dotenv import load_dotenv
 
-# ==========================================================
-# 1. CONFIGURATION & SETUP
-# ==========================================================
+# 1. SETUP & CONFIG
+# =========================================================
 load_dotenv()
+st.set_page_config(page_title="M-Saleh Chat", page_icon="🤖", layout="centered")
 
-st.set_page_config(
-    page_title="Pro Chat Workspace",
-    page_icon="⚡",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
+# Get API Key safely
+api_key = os.getenv("GROQ_API_KEY")
+if not api_key and "GROQ_API_KEY" in st.secrets:
+    api_key = st.secrets["GROQ_API_KEY"]
 
-def get_groq_api_key() -> str | None:
-    """Retrieves API key from Secrets or Environment."""
-    try:
-        return st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-    except Exception:
-        return None
-
-# Initialize Client
-api_key = get_groq_api_key()
 if not api_key:
-    st.warning("⚠️ GROQ_API_KEY not detected.")
-    st.info("Add it to `.streamlit/secrets.toml` or your `.env` file to proceed.")
+    st.error("⚠️ Missing API Key. Please add GROQ_API_KEY to your .env or secrets.")
     st.stop()
 
 client = Groq(api_key=api_key)
 
-# ==========================================================
-# 2. STATE MANAGEMENT
-# ==========================================================
-if "conversations" not in st.session_state:
-    st.session_state.conversations = {}
+# 2. SESSION STATE (Memory)
+# =========================================================
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-if "current_chat_id" not in st.session_state:
-    new_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    st.session_state.current_chat_id = new_id
-    st.session_state.conversations[new_id] = []
+if "model" not in st.session_state:
+    st.session_state.model = "llama-3.3-70b-versatile" # Default Text Model
 
-if "theme" not in st.session_state:
-    st.session_state.theme = "Dark"
+# 3. HELPER FUNCTIONS
+# =========================================================
+def process_image(uploaded_file):
+    """Encodes image to base64 for the API"""
+    try:
+        return base64.b64encode(uploaded_file.getvalue()).decode("utf-8")
+    except Exception as e:
+        st.error(f"Error processing image: {e}")
+        return None
 
-if "model_id" not in st.session_state:
-    st.session_state.model_id = "llama-3.2-90b-vision-preview"
-
-# ==========================================================
-# 3. PROFESSIONAL STYLING (CSS)
-# ==========================================================
-def inject_custom_css(theme: str):
-    """
-    Injects professional CSS based on the selected theme.
-    Removes clutter and focuses on typography and spacing.
-    """
-    if theme == "Dark":
-        # Gemini-inspired Dark Theme
-        bg_color = "#0e1117"  # Deep dark
-        chat_bg = "#161b22"
-        text_color = "#e6edf3"
-        accent_color = "#2f81f7"
-        border_color = "rgba(240, 246, 252, 0.1)"
-        user_bubble = "#1f6feb" # Blueish
-        ai_bubble = "#161b22"
-    else:
-        # Clean Professional Light Theme
-        bg_color = "#ffffff"
-        chat_bg = "#f6f8fa"
-        text_color = "#1f2328"
-        accent_color = "#0969da"
-        border_color = "rgba(31, 35, 40, 0.15)"
-        user_bubble = "#ddf4ff" # Light Blue
-        ai_bubble = "#f6f8fa"
-
-    css = f"""
-    <style>
-        /* Main Container Cleanups */
-        .stApp {{
-            background-color: {bg_color};
-            color: {text_color};
-        }}
-        
-        /* Remove Streamlit Header/Footer clutter */
-        header {{visibility: hidden;}}
-        footer {{visibility: hidden;}}
-        
-        /* Chat Input Styling */
-        .stChatInput textarea {{
-            background-color: {chat_bg} !important;
-            color: {text_color} !important;
-            border: 1px solid {border_color} !important;
-        }}
-        
-        /* Message Bubbles */
-        div[data-testid="stChatMessage"] {{
-            background-color: transparent;
-            padding: 1rem;
-        }}
-        
-        div[data-testid="stChatMessage"][data-role="user"] {{
-            background-color: transparent;
-        }}
-        
-        /* Sidebar Polish */
-        section[data-testid="stSidebar"] {{
-            background-color: {chat_bg};
-            border-right: 1px solid {border_color};
-        }}
-        
-        /* Headings */
-        h1, h2, h3 {{
-            font-family: 'Inter', sans-serif;
-            font-weight: 600;
-            color: {text_color} !important;
-        }}
-        
-        /* Custom Card for Content */
-        .pro-card {{
-            border: 1px solid {border_color};
-            border-radius: 8px;
-            padding: 20px;
-            background-color: {chat_bg};
-            margin-bottom: 20px;
-        }}
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
-
-inject_custom_css(st.session_state.theme)
-
-# ==========================================================
-# 4. HELPER FUNCTIONS
-# ==========================================================
-def image_to_base64(uploaded_file) -> str:
-    image = Image.open(uploaded_file).convert("RGB")
-    buf = io.BytesIO()
-    image.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode()
-
-def create_new_chat():
-    new_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    st.session_state.current_chat_id = new_id
-    st.session_state.conversations[new_id] = []
-    st.rerun()
-
-def delete_chat(chat_id):
-    if chat_id in st.session_state.conversations:
-        del st.session_state.conversations[chat_id]
-    # If we deleted the current one, reset
-    if chat_id == st.session_state.current_chat_id:
-        create_new_chat()
-    else:
-        st.rerun()
-
-# ==========================================================
-# 5. SIDEBAR (Navigation & Settings)
-# ==========================================================
+# 4. SIDEBAR (Settings)
+# =========================================================
 with st.sidebar:
-    st.title("🎛️ Controls")
+    st.header("⚙️ Settings")
     
-    # 5.1 Theme Toggle
-    theme_col1, theme_col2 = st.columns(2)
-    with theme_col1:
-        if st.button("🌑 Dark", use_container_width=True):
-            st.session_state.theme = "Dark"
-            st.rerun()
-    with theme_col2:
-        if st.button("☀️ Light", use_container_width=True):
-            st.session_state.theme = "Light"
-            st.rerun()
-
-    st.markdown("---")
-    
-    # 5.2 Model Selection (Making it Useful)
-    st.subheader("🤖 Model Intelligence")
-    model_choice = st.selectbox(
-        "Select Model",
-        [
-            "llama-3.2-90b-vision-preview", # Best for everything + images
-            "llama-3.2-11b-vision-preview", # Faster, good for images
-            "llama3-70b-8192",              # High intelligence text
-            "mixtral-8x7b-32768",           # Good reasoning
-        ],
-        index=0,
-        key="model_selector"
+    # Model Selector
+    model_option = st.selectbox(
+        "Choose AI Model:",
+        (
+            "llama-3.3-70b-versatile",          # Best for Text (Fast & Smart)
+            "meta-llama/llama-4-maverick-17b-128e-instruct", # Best for Images
+            "mixtral-8x7b-32768"                # Good Alternative
+        ),
+        index=0
     )
-    st.session_state.model_id = model_choice
+    st.session_state.model = model_option
     
-    # 5.3 System Prompt (Enhancing Utility)
-    st.subheader("🧠 System Persona")
-    system_prompt = st.text_area(
-        "Define AI Behavior", 
-        value="You are a helpful, professional, and concise AI assistant.",
-        height=100
-    )
-
-    st.markdown("---")
-
-    # 5.4 Chat History
-    st.subheader("💬 History")
-    if st.button("➕ New Conversation", use_container_width=True):
-        create_new_chat()
+    st.divider()
     
-    # List recent chats
-    chat_ids = list(st.session_state.conversations.keys())
-    for c_id in reversed(chat_ids[-10:]): # Show last 10
-        col_lbl, col_del = st.columns([0.8, 0.2])
-        label = f"Chat {c_id[9:14]}" # Simple timestamp label
-        
-        # Highlight active
-        btn_type = "primary" if c_id == st.session_state.current_chat_id else "secondary"
-        
-        if col_lbl.button(f"📄 {label}", key=f"sel_{c_id}", type=btn_type, use_container_width=True):
-            st.session_state.current_chat_id = c_id
-            st.rerun()
-        
-        if col_del.button("✖", key=f"del_{c_id}", help="Delete"):
-            delete_chat(c_id)
-
-# ==========================================================
-# 6. MAIN CHAT INTERFACE
-# ==========================================================
-
-# 6.1 Header
-st.title("M‑Saleh Professional AI")
-st.caption(f"Powered by **{st.session_state.model_id}** • Secure & Private")
-
-# 6.2 Chat Container
-current_messages = st.session_state.conversations[st.session_state.current_chat_id]
-
-for msg in current_messages:
-    with st.chat_message(msg["role"]):
-        for item in msg["content"]:
-            if item["type"] == "text":
-                st.markdown(item["text"])
-            elif item["type"] == "image_url":
-                st.image(item["image_url"]["url"], width=300)
-
-# 6.3 Input Area (Image + Text)
-with st.container():
-    # Integrated Image Uploader (Collapsible to save space)
-    with st.popover("📎 Attach Image", use_container_width=True):
-        uploaded_image = st.file_uploader(
-            "Upload an image for analysis", 
-            type=["png", "jpg", "jpeg"],
-            key=f"img_{len(current_messages)}"
-        )
+    # Clear Chat Button
+    if st.button("🗑️ Clear Conversation", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
     
-    # Chat Input
-    user_input = st.chat_input("Message M-Saleh AI...")
+    st.caption("Tip: Use 'Llama 4 Maverick' if you upload images.")
 
-# ==========================================================
-# 7. LOGIC & STREAMING
-# ==========================================================
-if user_input:
-    # 7.1 Construct User Message Payload
-    user_content = [{"type": "text", "text": user_input}]
+# 5. MAIN CHAT INTERFACE
+# =========================================================
+st.title("🤖 M-Saleh Chatbot")
+st.caption("Simple, Fast, and Powerful.")
+
+# Display Chat History
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        # Check if content is a list (multimodal/image) or string (text)
+        if isinstance(message["content"], list):
+            for item in message["content"]:
+                if item["type"] == "text":
+                    st.markdown(item["text"])
+                elif item["type"] == "image_url":
+                    st.image(item["image_url"]["url"], width=250)
+        else:
+            st.markdown(message["content"])
+
+# 6. INPUT AREA
+# =========================================================
+# Image Uploader (Optional)
+with st.expander("📷 Upload Image (Optional)"):
+    uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+
+# Chat Input
+if prompt := st.chat_input("Type your message..."):
     
-    if uploaded_image:
-        # Verify model supports vision
-        if "vision" not in st.session_state.model_id:
-            st.toast("⚠️ Switching to Vision model for image analysis...", icon="🔄")
-            st.session_state.model_id = "llama-3.2-90b-vision-preview"
+    # Prepare User Message
+    user_message_content = []
+    
+    # 1. Add Text
+    user_message_content.append({"type": "text", "text": prompt})
+    
+    # 2. Add Image (if uploaded)
+    if uploaded_file:
+        base64_image = process_image(uploaded_file)
+        if base64_image:
+            # Force switch to Vision Model if not selected
+            if "llama-4" not in st.session_state.model:
+                st.session_state.model = "meta-llama/llama-4-maverick-17b-128e-instruct"
+                st.toast("Switched to Llama 4 (Vision) for image support.", icon="👁️")
             
-        b64_img = image_to_base64(uploaded_image)
-        user_content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/png;base64,{b64_img}"}
-        })
+            user_message_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+            })
 
-    # Add to state
-    st.session_state.conversations[st.session_state.current_chat_id].append(
-        {"role": "user", "content": user_content}
-    )
-    
-    # Rerun to show user message immediately
-    st.rerun()
+    # Add to History (UI)
+    st.session_state.messages.append({"role": "user", "content": user_message_content})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+        if uploaded_file:
+            st.image(uploaded_file, width=250)
 
-# Trigger Assistant Response (after rerun)
-if current_messages and current_messages[-1]["role"] == "user":
+    # Generate Response
     with st.chat_message("assistant"):
-        placeholder = st.empty()
+        stream_container = st.empty()
         full_response = ""
         
         try:
-            # Prepare messages for API (System + History)
-            api_messages = [{"role": "system", "content": system_prompt}]
-            
-            # Add history (sanitize for API)
-            for m in current_messages:
-                api_messages.append(m)
-
-            stream = client.chat.completions.create(
-                model=st.session_state.model_id,
-                messages=api_messages,
-                temperature=0.6,
-                max_completion_tokens=2048,
-                stream=True
+            # Call Groq API
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages
+                ],
+                model=st.session_state.model,
+                stream=True,
             )
-            
-            for chunk in stream:
+
+            # Stream the response
+            for chunk in chat_completion:
                 if chunk.choices[0].delta.content:
                     full_response += chunk.choices[0].delta.content
-                    placeholder.markdown(full_response + "▌")
+                    stream_container.markdown(full_response + "▌")
             
-            placeholder.markdown(full_response)
+            stream_container.markdown(full_response)
             
-            # Save assistant response
-            st.session_state.conversations[st.session_state.current_chat_id].append(
-                {"role": "assistant", "content": [{"type": "text", "text": full_response}]}
-            )
-            
+            # Save to History
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+
         except Exception as e:
-            st.error(f"Error generating response: {str(e)}")
+            error_msg = str(e)
+            if "model_decommissioned" in error_msg:
+                st.error("❌ The selected model is outdated. Please switch to 'Llama 3.3' in the sidebar.")
+            else:
+                st.error(f"Error: {error_msg}")
