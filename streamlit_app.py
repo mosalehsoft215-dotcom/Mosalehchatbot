@@ -1,6 +1,6 @@
 import streamlit as st
 import base64
-import io
+import io 
 import os
 from PIL import Image
 from groq import Groq
