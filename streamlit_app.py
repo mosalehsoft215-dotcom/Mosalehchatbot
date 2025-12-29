@@ -1,12 +1,11 @@
 import streamlit as st
 import base64
-import io 
+import io
 import os
 from PIL import Image
 from groq import Groq
 from datetime import datetime
 from dotenv import load_dotenv
-from pathlib import Path
 
 # ==========================================================
 # CONFIG / SECRETS
@@ -44,305 +43,377 @@ st.set_page_config(
 # ==========================================================
 if "theme_mode" not in st.session_state:
     st.session_state.theme_mode = "dark"
-if "wrap_code" not in st.session_state:
-    st.session_state.wrap_code = True
-if "show_previews" not in st.session_state:
-    st.session_state.show_previews = True
 
 # ==========================================================
 # HELPERS
 # ==========================================================
-def apply_ui(theme_mode: str, wrap_code: bool) -> None:
-    """Apply professional theme styling inspired by Gemini and Grok"""
+def apply_ui(theme_mode: str) -> None:
+    """Apply professional theme styling"""
     is_dark = theme_mode == "dark"
     
     if is_dark:
-        # Dark theme - inspired by Gemini/Grok
-        bg_primary = "#0A0A0A"
-        bg_secondary = "#1A1A1A"
-        bg_chat = "#171717"
-        bg_user = "#2D2D2D"
-        bg_assistant = "#1E1E1E"
-        text_primary = "#E8E8E8"
-        text_secondary = "#A0A0A0"
+        # Dark theme - professional with good contrast
+        bg_main = "#0D0D0D"
+        bg_sidebar = "#1A1A1A"
+        bg_header = "#1F1F1F"
+        bg_chat = "#141414"
+        bg_input = "#1F1F1F"
+        bg_user = "#2A4B7C"
+        bg_assistant = "#1F1F1F"
+        text_primary = "#FFFFFF"
+        text_secondary = "#B4B4B4"
+        text_muted = "#808080"
         border_color = "#2D2D2D"
-        accent_color = "#8B5CF6"
-        input_bg = "#1E1E1E"
-        sidebar_bg = "#0F0F0F"
+        accent_color = "#7C3AED"
+        button_hover = "#2D2D2D"
     else:
         # Light theme - clean and professional
-        bg_primary = "#FFFFFF"
-        bg_secondary = "#F8F9FA"
+        bg_main = "#FAFAFA"
+        bg_sidebar = "#FFFFFF"
+        bg_header = "#FFFFFF"
         bg_chat = "#FFFFFF"
-        bg_user = "#F0F4FF"
-        bg_assistant = "#F8F9FA"
+        bg_input = "#F5F5F5"
+        bg_user = "#E3F2FD"
+        bg_assistant = "#F5F5F5"
         text_primary = "#1A1A1A"
-        text_secondary = "#6B7280"
-        border_color = "#E5E7EB"
+        text_secondary = "#4A4A4A"
+        text_muted = "#808080"
+        border_color = "#E0E0E0"
         accent_color = "#6366F1"
-        input_bg = "#FFFFFF"
-        sidebar_bg = "#F9FAFB"
-
-    code_wrap = "white-space: pre-wrap !important; word-break: break-word !important;" if wrap_code else ""
+        button_hover = "#F0F0F0"
 
     css = f"""
     <style>
-        /* Global Styles */
+        /* Reset and base */
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
         .stApp {{
-            background-color: {bg_primary};
-            color: {text_primary};
+            background-color: {bg_main};
         }}
         
-        /* Hide Streamlit branding */
-        #MainMenu {{visibility: hidden;}}
-        footer {{visibility: hidden;}}
-        header {{visibility: hidden;}}
+        /* Hide Streamlit elements */
+        #MainMenu, footer, header {{visibility: hidden;}}
+        .stDeployButton {{display: none;}}
         
-        /* Main container */
+        /* Main container - reduced padding */
         .main .block-container {{
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-            max-width: 1200px;
+            padding: 1rem 1.5rem;
+            max-width: 100%;
         }}
         
-        /* Sidebar styling */
+        /* Sidebar */
         [data-testid="stSidebar"] {{
-            background-color: {sidebar_bg};
+            background-color: {bg_sidebar};
             border-right: 1px solid {border_color};
+            padding: 0 !important;
         }}
         
         [data-testid="stSidebar"] > div:first-child {{
-            padding-top: 2rem;
+            padding: 1rem;
         }}
         
-        /* Header section */
-        .header-container {{
+        [data-testid="stSidebar"] .stMarkdown {{
+            margin-bottom: 0.5rem;
+        }}
+        
+        /* Sidebar title */
+        [data-testid="stSidebar"] h3 {{
+            color: {text_primary};
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            padding: 0 0.5rem;
+        }}
+        
+        /* Header - compact */
+        .app-header {{
+            background: {bg_header};
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid {border_color};
+            margin: -1rem -1.5rem 1rem -1.5rem;
+        }}
+        
+        .header-content {{
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 1.5rem 2rem;
-            background-color: {bg_secondary};
-            border-radius: 16px;
-            margin-bottom: 2rem;
-            border: 1px solid {border_color};
         }}
         
         .header-title {{
-            font-size: 1.8rem;
+            font-size: 1.5rem;
             font-weight: 700;
             color: {text_primary};
-            margin: 0;
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }}
         
         .header-subtitle {{
-            font-size: 0.95rem;
+            font-size: 0.85rem;
             color: {text_secondary};
             margin-top: 0.25rem;
         }}
         
-        /* Chat container */
-        .chat-container {{
-            background-color: {bg_chat};
-            border-radius: 20px;
-            padding: 1.5rem;
-            min-height: 60vh;
-            max-height: 65vh;
-            overflow-y: auto;
+        /* Chat area - no extra spacing */
+        .chat-wrapper {{
+            background: {bg_chat};
             border: 1px solid {border_color};
-            margin-bottom: 1rem;
-        }}
-        
-        /* Chat messages */
-        div[data-testid="stChatMessage"] {{
-            background-color: transparent;
-            padding: 0.75rem 0;
-            border: none;
-        }}
-        
-        div[data-testid="stChatMessage"] > div {{
-            border-radius: 18px;
-            padding: 1rem 1.25rem;
-            border: 1px solid {border_color};
-            max-width: 85%;
-        }}
-        
-        /* User message */
-        div[data-testid="stChatMessage"][data-testid*="user"] > div {{
-            background-color: {bg_user};
-            margin-left: auto;
-        }}
-        
-        /* Assistant message */
-        div[data-testid="stChatMessage"][data-testid*="assistant"] > div {{
-            background-color: {bg_assistant};
-            margin-right: auto;
-        }}
-        
-        /* Chat input area */
-        .input-container {{
-            background-color: {bg_secondary};
-            border-radius: 16px;
-            padding: 1.25rem;
-            border: 1px solid {border_color};
-        }}
-        
-        div[data-testid="stChatInput"] {{
-            background-color: transparent;
-        }}
-        
-        div[data-testid="stChatInput"] textarea {{
-            background-color: {input_bg} !important;
-            border: 2px solid {border_color} !important;
-            border-radius: 12px !important;
-            padding: 0.875rem !important;
-            font-size: 0.95rem !important;
-            color: {text_primary} !important;
-            resize: none !important;
-            min-height: 52px !important;
-        }}
-        
-        div[data-testid="stChatInput"] textarea:focus {{
-            border-color: {accent_color} !important;
-            box-shadow: 0 0 0 3px {accent_color}20 !important;
-        }}
-        
-        /* File uploader */
-        .stFileUploader {{
-            background-color: transparent;
-            border: 2px dashed {border_color};
             border-radius: 12px;
+            height: calc(100vh - 280px);
+            overflow-y: auto;
             padding: 1rem;
             margin-bottom: 1rem;
         }}
         
-        .stFileUploader:hover {{
-            border-color: {accent_color};
-            background-color: {accent_color}10;
+        /* Empty state */
+        .empty-state {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+        }}
+        
+        .empty-state h2 {{
+            font-size: 1.75rem;
+            color: {text_primary};
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }}
+        
+        .empty-state p {{
+            color: {text_secondary};
+            font-size: 1rem;
+        }}
+        
+        /* Chat messages - compact */
+        div[data-testid="stChatMessage"] {{
+            padding: 0.5rem 0;
+            background: transparent;
+        }}
+        
+        div[data-testid="stChatMessage"] > div {{
+            padding: 0.875rem 1rem;
+            border-radius: 12px;
+            max-width: 80%;
+            border: 1px solid {border_color};
+        }}
+        
+        /* User message */
+        div[data-testid="stChatMessage"][data-testid*="user"] > div,
+        [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) > div {{
+            background: {bg_user};
+            margin-left: auto;
+            border-color: transparent;
+        }}
+        
+        [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {{
+            flex-direction: row-reverse;
+        }}
+        
+        /* Assistant message */
+        div[data-testid="stChatMessage"][data-testid*="assistant"] > div,
+        [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) > div {{
+            background: {bg_assistant};
+            margin-right: auto;
+        }}
+        
+        /* Message text */
+        div[data-testid="stChatMessage"] p {{
+            color: {text_primary};
+            line-height: 1.6;
+            margin: 0;
+        }}
+        
+        /* Input container - compact */
+        .input-wrapper {{
+            background: {bg_input};
+            border: 1px solid {border_color};
+            border-radius: 12px;
+            padding: 0.875rem;
+        }}
+        
+        /* File uploader - compact */
+        [data-testid="stFileUploader"] {{
+            margin-bottom: 0.75rem;
+        }}
+        
+        [data-testid="stFileUploader"] > div {{
+            padding: 0.75rem;
+            border: 1.5px dashed {border_color};
+            border-radius: 8px;
+            background: transparent;
+        }}
+        
+        [data-testid="stFileUploader"] label {{
+            color: {text_secondary};
+            font-size: 0.85rem;
+        }}
+        
+        [data-testid="stFileUploader"] section {{
+            border: none;
+            padding: 0;
+        }}
+        
+        /* Chat input */
+        [data-testid="stChatInput"] {{
+            border: none !important;
+            padding: 0 !important;
+        }}
+        
+        [data-testid="stChatInput"] textarea {{
+            background: {bg_chat} !important;
+            border: 1px solid {border_color} !important;
+            border-radius: 10px !important;
+            padding: 0.75rem 1rem !important;
+            color: {text_primary} !important;
+            font-size: 0.95rem !important;
+            min-height: 44px !important;
+            max-height: 120px !important;
+        }}
+        
+        [data-testid="stChatInput"] textarea:focus {{
+            border-color: {accent_color} !important;
+            box-shadow: 0 0 0 2px {accent_color}30 !important;
         }}
         
         /* Buttons */
-        .stButton > button {{
+        .stButton button {{
             width: 100%;
-            border-radius: 10px;
+            background: {bg_input};
+            color: {text_primary};
+            border: 1px solid {border_color};
+            border-radius: 8px;
             padding: 0.625rem 1rem;
             font-weight: 500;
-            border: 1px solid {border_color};
-            background-color: {bg_secondary};
-            color: {text_primary};
+            font-size: 0.9rem;
             transition: all 0.2s;
-        }}
-        
-        .stButton > button:hover {{
-            background-color: {accent_color};
-            border-color: {accent_color};
-            color: white;
-            transform: translateY(-1px);
-        }}
-        
-        /* Primary button (New Chat) */
-        .stButton > button[kind="primary"] {{
-            background-color: {accent_color};
-            color: white;
-            border: none;
-        }}
-        
-        .stButton > button[kind="primary"]:hover {{
-            background-color: {accent_color}DD;
-        }}
-        
-        /* Radio buttons */
-        .stRadio > div {{
-            flex-direction: row;
-            gap: 0.5rem;
-        }}
-        
-        .stRadio > div > label {{
-            background-color: {bg_secondary};
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            border: 1px solid {border_color};
             cursor: pointer;
         }}
         
-        /* Toggle */
-        .stCheckbox {{
-            padding: 0.5rem 0;
+        .stButton button:hover {{
+            background: {button_hover};
+            border-color: {accent_color};
+        }}
+        
+        /* Primary button */
+        .stButton button[kind="primary"] {{
+            background: {accent_color};
+            color: white;
+            border: none;
+            font-weight: 600;
+        }}
+        
+        .stButton button[kind="primary"]:hover {{
+            background: {accent_color}DD;
+            transform: translateY(-1px);
+        }}
+        
+        /* Radio buttons - compact */
+        .stRadio {{
+            margin: 0.5rem 0;
+        }}
+        
+        .stRadio > label {{
+            color: {text_primary};
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }}
+        
+        .stRadio [role="radiogroup"] {{
+            gap: 0.5rem;
+        }}
+        
+        .stRadio [role="radio"] {{
+            background: {bg_input};
+            border: 1px solid {border_color};
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
         }}
         
         /* Divider */
         hr {{
-            border-color: {border_color};
-            margin: 1rem 0;
+            border: none;
+            border-top: 1px solid {border_color};
+            margin: 0.75rem 0;
         }}
         
-        /* Code blocks */
-        pre {{
-            background-color: {bg_secondary} !important;
-            border: 1px solid {border_color} !important;
-            border-radius: 8px !important;
-            padding: 1rem !important;
+        /* Caption text */
+        .stCaption {{
+            color: {text_muted};
+            font-size: 0.8rem;
         }}
         
-        pre code {{
-            {code_wrap}
-            color: {text_primary} !important;
+        /* Expander */
+        [data-testid="stExpander"] {{
+            background: transparent;
+            border: 1px solid {border_color};
+            border-radius: 8px;
+            margin: 0.5rem 0;
+        }}
+        
+        [data-testid="stExpander"] summary {{
+            color: {text_primary};
+            font-weight: 500;
+            padding: 0.75rem;
         }}
         
         /* Scrollbar */
         ::-webkit-scrollbar {{
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
         }}
         
         ::-webkit-scrollbar-track {{
-            background: {bg_secondary};
-            border-radius: 4px;
+            background: transparent;
         }}
         
         ::-webkit-scrollbar-thumb {{
             background: {border_color};
-            border-radius: 4px;
+            border-radius: 3px;
         }}
         
         ::-webkit-scrollbar-thumb:hover {{
-            background: {text_secondary};
+            background: {text_muted};
         }}
         
-        /* Quick action buttons */
-        .quick-actions {{
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 1rem;
-            flex-wrap: wrap;
+        /* Code blocks */
+        pre {{
+            background: {bg_input} !important;
+            border: 1px solid {border_color} !important;
+            border-radius: 6px !important;
+            padding: 0.75rem !important;
         }}
         
-        .quick-action-btn {{
-            background-color: {bg_secondary};
-            border: 1px solid {border_color};
-            border-radius: 20px;
-            padding: 0.5rem 1rem;
-            font-size: 0.85rem;
+        code {{
+            color: {text_primary} !important;
+            font-size: 0.9rem !important;
+        }}
+        
+        /* Images in chat */
+        [data-testid="stChatMessage"] img {{
+            border-radius: 8px;
+            max-width: 100%;
+            margin-top: 0.5rem;
+        }}
+        
+        /* Settings section */
+        .settings-section {{
+            margin: 0.75rem 0;
+        }}
+        
+        .settings-label {{
             color: {text_primary};
-            cursor: pointer;
-            transition: all 0.2s;
-        }}
-        
-        .quick-action-btn:hover {{
-            background-color: {accent_color}20;
-            border-color: {accent_color};
-        }}
-        
-        /* Settings popover */
-        [data-testid="stPopover"] {{
-            background-color: {bg_secondary};
-        }}
-        
-        /* Captions and help text */
-        .stCaption {{
-            color: {text_secondary};
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            display: block;
         }}
     </style>
     """
@@ -361,7 +432,7 @@ def new_chat():
     st.session_state.uploader_counter += 1
     st.rerun()
 
-def get_preview(chat_messages, max_len: int = 40) -> str:
+def get_preview(chat_messages, max_len: int = 35) -> str:
     """Return a short label preview based on the last user message."""
     last_user_text = ""
     for m in reversed(chat_messages):
@@ -378,7 +449,7 @@ def get_preview(chat_messages, max_len: int = 40) -> str:
     return (last_user_text[:max_len] + "...") if len(last_user_text) > max_len else last_user_text
 
 # Apply UI theme
-apply_ui(st.session_state.theme_mode, st.session_state.wrap_code)
+apply_ui(st.session_state.theme_mode)
 
 # ==========================================================
 # SESSION STATE
@@ -403,53 +474,36 @@ with st.sidebar:
     
     st.divider()
     
-    # Show conversation history
+    # Conversation history
     if st.session_state.conversations:
-        st.caption("RECENT CHATS")
         for chat_id in reversed(list(st.session_state.conversations.keys())):
             messages_in_chat = st.session_state.conversations[chat_id]
-            preview = get_preview(messages_in_chat) if st.session_state.show_previews else f"Chat {chat_id[-6:]}"
+            preview = get_preview(messages_in_chat)
             
             is_active = chat_id == st.session_state.current_chat_id
-            label = f"{'🟢' if is_active else '💬'} {preview}"
+            icon = "🟢" if is_active else "💬"
             
-            if st.button(label, key=f"chat_{chat_id}", use_container_width=True):
+            if st.button(f"{icon} {preview}", key=f"chat_{chat_id}", use_container_width=True):
                 st.session_state.current_chat_id = chat_id
                 st.session_state.uploader_counter += 1
                 st.rerun()
     
     st.divider()
     
-    # Settings in sidebar
-    with st.expander("⚙️ Settings", expanded=False):
+    # Settings
+    with st.expander("⚙️ Settings"):
+        st.markdown('<span class="settings-label">Theme</span>', unsafe_allow_html=True)
         theme = st.radio(
-            "Theme",
+            "theme_selector",
             ["light", "dark"],
             index=0 if st.session_state.theme_mode == "light" else 1,
-            horizontal=True
+            horizontal=True,
+            label_visibility="collapsed"
         )
         
-        wrap_code = st.checkbox(
-            "Wrap code blocks",
-            value=st.session_state.wrap_code
-        )
-        
-        show_previews = st.checkbox(
-            "Show message previews",
-            value=st.session_state.show_previews
-        )
-        
-        # Apply changes
-        if (theme != st.session_state.theme_mode or 
-            wrap_code != st.session_state.wrap_code or 
-            show_previews != st.session_state.show_previews):
+        if theme != st.session_state.theme_mode:
             st.session_state.theme_mode = theme
-            st.session_state.wrap_code = wrap_code
-            st.session_state.show_previews = show_previews
             st.rerun()
-    
-    st.divider()
-    st.caption("🔑 Powered by Groq API")
 
 # ==========================================================
 # MAIN CONTENT
@@ -458,28 +512,29 @@ with st.sidebar:
 # Header
 st.markdown(
     """
-    <div class="header-container">
-        <div>
-            <div class="header-title">✨ M‑Saleh AI Assistant</div>
-            <div class="header-subtitle">Powered by Groq • Multi-modal conversations • Real-time streaming</div>
+    <div class="app-header">
+        <div class="header-content">
+            <div>
+                <div class="header-title">✨ M‑Saleh AI Assistant</div>
+                <div class="header-subtitle">Powered by Groq • Multi-modal conversations • Real-time streaming</div>
+            </div>
         </div>
     </div>
     """,
     unsafe_allow_html=True
 )
 
-# Chat container
+# Chat area
 messages = st.session_state.conversations[st.session_state.current_chat_id]
 
-st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+st.markdown('<div class="chat-wrapper">', unsafe_allow_html=True)
 
-# Display chat history
 if not messages:
     st.markdown(
         """
-        <div style="text-align: center; padding: 4rem 2rem;">
-            <h2 style="margin-bottom: 1rem;">👋 Hello! How can I assist you today?</h2>
-            <p style="color: #6B7280; font-size: 1rem;">Start a conversation by typing a message below</p>
+        <div class="empty-state">
+            <h2>👋 Hello! How can I assist you today?</h2>
+            <p>Start a conversation by typing a message below</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -491,18 +546,18 @@ else:
                 if item["type"] == "text":
                     st.markdown(item["text"])
                 elif item["type"] == "image_url":
-                    st.image(item["image_url"]["url"], width=400)
+                    st.image(item["image_url"]["url"], width=350)
 
 st.markdown('</div>', unsafe_allow_html=True)
 
 # Input area
-st.markdown('<div class="input-container">', unsafe_allow_html=True)
+st.markdown('<div class="input-wrapper">', unsafe_allow_html=True)
 
 uploaded_image = st.file_uploader(
-    "📎 Attach an image (optional)",
+    "📎 Attach image",
     type=["png", "jpg", "jpeg"],
     key=f"uploader_{st.session_state.uploader_counter}",
-    help="Upload an image to include in your message"
+    label_visibility="collapsed"
 )
 
 user_prompt = st.chat_input("Ask me anything...")
@@ -520,16 +575,15 @@ if user_prompt and user_prompt.strip():
             "image_url": {"url": f"data:image/png;base64,{image_b64}"}
         })
     
-    # Save user message
     messages.append({"role": "user", "content": user_content})
     
-    # Display user message immediately
+    # Display user message
     with st.chat_message("user"):
         st.markdown(user_prompt.strip())
         if uploaded_image:
-            st.image(uploaded_image, width=400)
+            st.image(uploaded_image, width=350)
     
-    # Assistant response (streaming)
+    # Assistant response
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_response = ""
@@ -558,7 +612,6 @@ if user_prompt and user_prompt.strip():
             placeholder.error(f"Error: {str(e)}")
             full_response = f"Sorry, I encountered an error: {str(e)}"
     
-    # Save assistant message
     messages.append({"role": "assistant", "content": [{"type": "text", "text": full_response}]})
     st.session_state.uploader_counter += 1
     st.rerun()
