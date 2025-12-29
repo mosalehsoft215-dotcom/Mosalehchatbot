@@ -7,12 +7,12 @@ from groq import Groq
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
+import functools
 
 # ==========================================================
-# CONFIG / SECRETS (KEPT EXACTLY AS REQUESTED)
+# CONFIG / SECRETS
 # ==========================================================
 load_dotenv()
-
 def get_groq_api_key() -> str | None:
     """Prefer Streamlit Secrets (cloud), fall back to env/.env (local)."""
     try:
@@ -21,12 +21,10 @@ def get_groq_api_key() -> str | None:
     except Exception:
         pass
     return os.getenv("GROQ_API_KEY")
-
 GROQ_API_KEY = get_groq_api_key()
 if not GROQ_API_KEY:
     st.error("❌ GROQ_API_KEY not found. Add it to Streamlit Secrets or create a local .env file.")
     st.stop()
-
 client = Groq(api_key=GROQ_API_KEY)
 
 # ==========================================================
@@ -34,7 +32,7 @@ client = Groq(api_key=GROQ_API_KEY)
 # ==========================================================
 st.set_page_config(
     page_title="M‑Saleh Chatbot",
-    page_icon="🤖",
+    page_icon="🝪",
     layout="centered",
     initial_sidebar_state="expanded"
 )
@@ -43,23 +41,31 @@ st.set_page_config(
 # THEME + UI STATE
 # ==========================================================
 if "theme_mode" not in st.session_state:
-    st.session_state.theme_mode = "Dark"  # Default to Dark
-
+    st.session_state.theme_mode = "Dark"  # Light / Dark
 if "starry_bg" not in st.session_state:
     st.session_state.starry_bg = True
-
 if "wrap_code" not in st.session_state:
     st.session_state.wrap_code = False
-
 if "show_previews" not in st.session_state:
     st.session_state.show_previews = True
-
-if "selected_model" not in st.session_state:
-    st.session_state.selected_model = "llama-3.3-70b-versatile"
+if "system_prompt" not in st.session_state:
+    st.session_state.system_prompt = "You are a professional, helpful AI assistant."
+if "temperature" not in st.session_state:
+    st.session_state.temperature = 0.9
+if "max_tokens" not in st.session_state:
+    st.session_state.max_tokens = 1024
+if "model" not in st.session_state:
+    st.session_state.model = "meta-llama/llama-4-maverick-17b-128e-instruct"
+if "show_ts" not in st.session_state:
+    st.session_state.show_ts = False
 
 # ==========================================================
 # HELPERS
 # ==========================================================
+@st.cache_data
+def get_models():
+    return sorted([m.id for m in client.models.list().data])
+
 def load_file_b64(path: Path) -> str | None:
     try:
         data = path.read_bytes()
@@ -69,138 +75,142 @@ def load_file_b64(path: Path) -> str | None:
 
 def apply_ui(theme_mode: str, starry_bg: bool, wrap_code: bool) -> None:
     """
-    Applied Fixed UI with High Contrast for Dark Mode
+    Streamlit doesn't have a first-class runtime theme switch for custom UIs,
+    so we style the app with CSS.
     """
     is_dark = theme_mode == "Dark"
-    
-    # Try to load local asset, else None
+    use_custom = True  # Always use custom themes
     bg_img_b64 = None
     if is_dark and starry_bg:
         bg_path = Path(__file__).parent / "assets" / "space_bg.png"
-        if bg_path.exists():
-            bg_img_b64 = load_file_b64(bg_path)
-
-    # DEFINING COLORS
+        bg_img_b64 = load_file_b64(bg_path)
+    # Backgrounds
     if is_dark:
-        # HIGH CONTRAST DARK MODE
-        base_bg = "#05070A"
-        card_bg = "rgba(20, 25, 35, 0.95)" # Less transparent for readability
-        text_color = "#FFFFFF"              # Pure White Text
-        muted_color = "#A0AAB8"
-        border_color = "rgba(255,255,255,0.15)"
-        user_bubble = "rgba(60, 80, 200, 0.3)"
-        bot_bubble = "rgba(255, 255, 255, 0.1)"
+        base_bg = "#070A12"
+        card_bg = "rgba(18, 24, 38, 0.72)"
+        text = "#E8EEF8"
+        muted = "rgba(232, 238, 248, 0.72)"
+        border = "rgba(255,255,255,0.10)"
     else:
-        # CLEAN LIGHT MODE
         base_bg = "#F6F7FB"
-        card_bg = "rgba(255, 255, 255, 0.9)"
-        text_color = "#0E1222"
-        muted_color = "rgba(14, 18, 34, 0.65)"
-        border_color = "rgba(14,18,34,0.10)"
-        user_bubble = "rgba(120,130,255,0.15)"
-        bot_bubble = "rgba(0,0,0,0.05)"
-
-    # Background CSS
+        card_bg = "rgba(255, 255, 255, 0.80)"
+        text = "#0E1222"
+        muted = "rgba(14, 18, 34, 0.65)"
+        border = "rgba(14,18,34,0.10)"
     bg_css = ""
     if bg_img_b64:
-        # Use image if found
         bg_css = f"""
-            background-color: {base_bg};
-            background-image: 
-              radial-gradient(1200px 700px at 20% 5%, rgba(120,130,255,0.15), transparent 60%),
-              url("data:image/png;base64,{bg_img_b64}");
-            background-size: cover;
-            background-attachment: fixed;
-        """
-    elif is_dark and starry_bg:
-        # CSS Fallback if image missing (Professional Dark Gradient)
-        bg_css = f"""
-            background-color: {base_bg};
-            background-image: 
-              radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
-              radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
-              radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
-            background-attachment: fixed;
+        background-color: {base_bg};
+        background-image:
+          radial-gradient(1200px 700px at 20% 5%, rgba(120,130,255,0.22), transparent 60%),
+          radial-gradient(900px 500px at 90% 15%, rgba(255,90,160,0.14), transparent 55%),
+          url("data:image/png;base64,{bg_img_b64}");
+        background-size: auto, auto, cover;
+        background-position: center, center, center;
+        background-attachment: fixed;
         """
     else:
-        bg_css = f"background-color: {base_bg};"
-
+        bg_css = f"""
+        background-color: {base_bg};
+        background-image:
+          radial-gradient(1200px 700px at 20% 5%, rgba(120,130,255,0.22), transparent 60%),
+          radial-gradient(900px 500px at 90% 15%, rgba(255,90,160,0.14), transparent 55%);
+        background-attachment: fixed;
+        """
     code_wrap_css = ""
     if wrap_code:
-        code_wrap_css = "pre code { white-space: pre-wrap !important; word-break: break-word !important; }"
-
-    # INJECT CSS
+        code_wrap_css = """
+        pre code { white-space: pre-wrap !important; word-break: break-word !important; }
+        """
     css = f"""
     <style>
-      /* Page background */
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
       .stApp {{
+        font-family: 'Inter', sans-serif;
         {bg_css}
-        color: {text_color};
       }}
-
       /* Content width + spacing */
       section.main > div {{
-        max-width: 900px;
-        padding-top: 2rem;
+        max-width: 980px;
+        padding-top: 1.0rem;
+        padding-bottom: 1.2rem;
       }}
-
-      /* Header Styling */
+      /* Subtle top header */
       .ms-topbar {{
-        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 0.5rem;
+      }}
+      .ms-brand {{
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
       }}
       .ms-title {{
-        font-size: 1.8rem;
-        font-weight: 800;
-        color: {text_color};
+        font-size: 1.35rem;
+        font-weight: 750;
+        letter-spacing: -0.02em;
+        color: {text};
       }}
       .ms-subtitle {{
-        font-size: 1rem;
-        color: {muted_color};
+        font-size: 0.92rem;
+        color: {muted};
+        margin-top: -2px;
       }}
-
-      /* Main Chat Card */
+      /* Chat "card" */
       .ms-card {{
         background: {card_bg};
-        border: 1px solid {border_color};
+        border: 1px solid {border};
         border-radius: 20px;
-        padding: 20px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        margin-bottom: 20px;
+        padding: 14px 14px 10px 14px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.10);
       }}
-
-      /* Chat Bubbles */
+      /* Chat message bubbles */
       div[data-testid="stChatMessage"] {{
+        padding: 0.35rem 0.25rem;
+      }}
+      div[data-testid="stChatMessage"] > div {{
+        border-radius: 16px;
+        padding: 0.55rem 0.75rem;
+      }}
+      /* user bubble */
+      div[data-testid="stChatMessage"][data-role="user"] > div {{
+        border: 1px solid {border};
+        background: rgba(120,130,255,0.12);
+      }}
+      /* assistant bubble */
+      div[data-testid="stChatMessage"][data-role="assistant"] > div {{
+        border: 1px solid {border};
+        background: rgba(255,255,255,0.04);
+      }}
+      /* Chat input */
+      div[data-testid="stChatInput"] textarea {{
+        border-radius: 16px !important;
+        border: 1px solid {border} !important;
+      }}
+      div[data-testid="stChatInput"] {{
+        padding-top: 0.5rem;
+      }}
+      /* File uploader card */
+      .ms-uploader {{
+        margin-top: 0.65rem;
+      }}
+      /* Sidebar polish */
+      [data-testid="stSidebar"] > div {{
+        padding-top: 1.0rem;
+      }}
+      /* Reduce Streamlit default top padding a bit */
+      header[data-testid="stHeader"] {{
         background: transparent;
       }}
-      
-      div[data-testid="stChatMessage"][data-role="user"] div[data-testid="stMarkdownContainer"] {{
-        background: {user_bubble};
-        color: {text_color};
-        padding: 12px 18px;
-        border-radius: 18px;
-        border-bottom-right-radius: 4px;
+      /* Buttons */
+      .stButton > button {{
+        border-radius: 12px;
       }}
-      
-      div[data-testid="stChatMessage"][data-role="assistant"] div[data-testid="stMarkdownContainer"] {{
-        background: {bot_bubble};
-        color: {text_color};
-        padding: 12px 18px;
-        border-radius: 18px;
-        border-bottom-left-radius: 4px;
-      }}
-
-      /* Input Area */
-      div[data-testid="stChatInput"] textarea {{
-        background: {card_bg} !important;
-        color: {text_color} !important;
-        border: 1px solid {border_color} !important;
-      }}
-
-      /* Markdown text adjustment */
-      p, li, h1, h2, h3, h4, h5, h6 {{
-        color: {text_color} !important;
-      }}
-      
       {code_wrap_css}
     </style>
     """
@@ -220,6 +230,7 @@ def new_chat():
     st.rerun()
 
 def get_preview(chat_messages, max_len: int = 34) -> str:
+    """Return a short label preview based on the last user message."""
     last_user_text = ""
     for m in reversed(chat_messages):
         if m.get("role") == "user":
@@ -234,7 +245,7 @@ def get_preview(chat_messages, max_len: int = 34) -> str:
     last_user_text = " ".join(last_user_text.split())
     return (last_user_text[:max_len] + "…") if len(last_user_text) > max_len else last_user_text
 
-# Apply UI theme first
+# Apply UI theme first (so it affects everything below)
 apply_ui(st.session_state.theme_mode, st.session_state.starry_bg, st.session_state.wrap_code)
 
 # ==========================================================
@@ -242,12 +253,10 @@ apply_ui(st.session_state.theme_mode, st.session_state.starry_bg, st.session_sta
 # ==========================================================
 if "conversations" not in st.session_state:
     st.session_state.conversations = {}
-
 if "current_chat_id" not in st.session_state:
     chat_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     st.session_state.current_chat_id = chat_id
     st.session_state.conversations[chat_id] = []
-
 if "uploader_counter" not in st.session_state:
     st.session_state.uploader_counter = 0
 
@@ -255,87 +264,119 @@ if "uploader_counter" not in st.session_state:
 # SIDEBAR
 # ==========================================================
 with st.sidebar:
-    st.title("🤖 M-Saleh")
-    
-    # Model Selector (CRITICAL UPDATE)
-    st.markdown("### 🧠 AI Model")
-    st.session_state.selected_model = st.selectbox(
-        "Choose Model:",
-        options=[
-            "llama-3.3-70b-versatile",          # Best for pure text
-            "meta-llama/llama-4-maverick-17b-128e-instruct"  # Vision support
-        ],
-        index=0,
-        help="Use 'Maverick' if you need to analyze images. Use 'Versatile' for faster text."
-    )
-
-    st.divider()
-    
+    st.markdown("### 💬 Chats")
     if st.button("➕ New Chat", use_container_width=True):
         new_chat()
-
-    st.markdown("### 💬 History")
-    for chat_id in reversed(list(st.session_state.conversations.keys())):
-        preview = get_preview(st.session_state.conversations[chat_id]) if st.session_state.show_previews else f"Chat {chat_id[-6:]}"
-        if st.button(f"🗨️ {preview}", key=f"chat_{chat_id}", use_container_width=True):
-            st.session_state.current_chat_id = chat_id
-            st.session_state.uploader_counter += 1
-            st.rerun()
+    st.divider()
+    # Group chats by month
+    chat_groups = {}
+    for chat_id in sorted(st.session_state.conversations.keys(), reverse=True):
+        dt = datetime.strptime(chat_id, "%Y%m%d_%H%M%S")
+        month = dt.strftime("%B %Y")
+        if month not in chat_groups:
+            chat_groups[month] = []
+        chat_groups[month].append((chat_id, dt))
+    for month in list(chat_groups.keys()):
+        st.markdown(f"#### {month}")
+        for chat_id, dt in chat_groups[month]:
+            preview = get_preview(st.session_state.conversations[chat_id]) if st.session_state.show_previews else f"Chat {chat_id[-6:]}"
+            label = f"🗨️ {preview}"
+            col1, col2 = st.columns([0.85, 0.15])
+            with col1:
+                if st.button(label, key=f"chat_{chat_id}", use_container_width=True):
+                    st.session_state.current_chat_id = chat_id
+                    st.session_state.uploader_counter += 1
+                    st.rerun()
+            with col2:
+                if st.button("🗑️", key=f"del_{chat_id}"):
+                    del st.session_state.conversations[chat_id]
+                    if st.session_state.current_chat_id == chat_id:
+                        if st.session_state.conversations:
+                            st.session_state.current_chat_id = sorted(st.session_state.conversations.keys(), reverse=True)[0]
+                        else:
+                            new_chat()
+                    st.rerun()
+    if not chat_groups:
+        st.markdown("No chats yet.")
+    st.divider()
+    st.caption("Tip: Add your Groq key in **Secrets** (cloud) or a local **.env** file.")
 
 # ==========================================================
-# TOP BAR + SETTINGS
+# TOP BAR + SETTINGS (popover)
 # ==========================================================
 col_a, col_b = st.columns([7, 1])
 with col_a:
     st.markdown(
         """
         <div class="ms-topbar">
-          <div class="ms-title">🤖 M‑Saleh Chatbot</div>
-          <div class="ms-subtitle">Professional AI Assistant • Multi-Model Support</div>
+          <div class="ms-brand">
+            <div>
+              <div class="ms-title">🤖 M‑Saleh Chatbot</div>
+              <div class="ms-subtitle">Modern multi‑chat • Optional image input • Streaming responses • Powered by Groq</div>
+            </div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True
     )
-
 with col_b:
     with st.popover("⚙️", use_container_width=True):
         st.markdown("#### Settings")
-        
-        # Theme Selector (Removed System option)
         theme = st.radio(
-            "Theme Mode",
-            ["Dark", "Light"],
-            index=["Dark", "Light"].index(st.session_state.theme_mode),
+            "Appearance",
+            ["Light", "Dark"],
+            index=["Light", "Dark"].index(st.session_state.theme_mode),
             horizontal=True
         )
-
-        st.divider()
-        wrap_code = st.toggle("Wrap Code Lines", value=st.session_state.wrap_code)
-        show_previews = st.toggle("Show History Previews", value=st.session_state.show_previews)
-        
         starry_bg = st.session_state.starry_bg
         if theme == "Dark":
-            starry_bg = st.toggle("Starry Background", value=st.session_state.starry_bg)
-
+            starry_bg = st.toggle("Enable starry background", value=st.session_state.starry_bg)
+        else:
+            st.caption("Starry background is available in Dark mode.")
+        wrap_code = st.toggle("Wrap long lines for code blocks", value=st.session_state.wrap_code)
+        show_previews = st.toggle("Show conversation previews in history", value=st.session_state.show_previews)
+        show_ts = st.toggle("Show message timestamps", value=st.session_state.show_ts)
+        models = get_models()
+        try:
+            model_index = models.index(st.session_state.model)
+        except ValueError:
+            model_index = 0
+        model = st.selectbox("Model", models, index=model_index)
+        system_prompt = st.text_area("System Prompt", value=st.session_state.system_prompt, height=100)
+        temperature = st.slider("Temperature", 0.0, 2.0, st.session_state.temperature, 0.1)
+        max_tokens = st.slider("Max completion tokens", 100, 8192, st.session_state.max_tokens, 100)
         # Apply changes
-        if (theme != st.session_state.theme_mode or 
-            wrap_code != st.session_state.wrap_code or 
-            show_previews != st.session_state.show_previews or 
-            starry_bg != st.session_state.starry_bg):
-            
+        changed = (
+            theme != st.session_state.theme_mode
+            or wrap_code != st.session_state.wrap_code
+            or show_previews != st.session_state.show_previews
+            or starry_bg != st.session_state.starry_bg
+            or show_ts != st.session_state.show_ts
+            or model != st.session_state.model
+            or system_prompt != st.session_state.system_prompt
+            or temperature != st.session_state.temperature
+            or max_tokens != st.session_state.max_tokens
+        )
+        if changed:
             st.session_state.theme_mode = theme
             st.session_state.wrap_code = wrap_code
             st.session_state.show_previews = show_previews
             st.session_state.starry_bg = starry_bg
+            st.session_state.show_ts = show_ts
+            st.session_state.model = model
+            st.session_state.system_prompt = system_prompt
+            st.session_state.temperature = temperature
+            st.session_state.max_tokens = max_tokens
             st.rerun()
 
 # ==========================================================
 # MAIN CHAT "CARD"
 # ==========================================================
 st.markdown('<div class="ms-card">', unsafe_allow_html=True)
-
 messages = st.session_state.conversations[st.session_state.current_chat_id]
-
+# Welcome message if empty
+if not messages:
+    st.markdown('<div style="text-align: center; padding: 2rem 0;">Hi! How can I assist you today?<br>Try asking about anything or upload an image for analysis.</div>', unsafe_allow_html=True)
 # Display chat history
 for msg in messages:
     with st.chat_message(msg["role"]):
@@ -343,76 +384,53 @@ for msg in messages:
             if item["type"] == "text":
                 st.markdown(item["text"])
             elif item["type"] == "image_url":
-                # Handle images in history
-                st.image(item["image_url"]["url"], width=300)
-
+                st.image(item["image_url"]["url"])
+        if st.session_state.show_ts and "ts" in msg:
+            st.caption(msg["ts"].strftime("%Y-%m-%d %H:%M"))
 # Input area (uploader + chat input)
 with st.container():
+    st.markdown('<div class="ms-uploader">', unsafe_allow_html=True)
     uploaded_image = st.file_uploader(
-        "📎 Attach an image (Required for Vision Model)",
+        "📎 Attach an image (optional)",
         type=["png", "jpg", "jpeg"],
         key=f"uploader_{st.session_state.uploader_counter}",
+        label_visibility="visible"
     )
-    
-    if uploaded_image and "llama-4" not in st.session_state.selected_model:
-        st.warning("⚠️ You attached an image but selected a Text-only model. Please switch to 'Llama 4 Maverick' in the sidebar.")
-
-user_prompt = st.chat_input("Type a message...")
-
+    if uploaded_image:
+        st.image(uploaded_image, caption="Uploaded image preview", use_column_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+user_prompt = st.chat_input("Type a message and press Enter…")
 # Send logic
 if user_prompt and user_prompt.strip():
     user_content = [{"type": "text", "text": user_prompt.strip()}]
-    
-    # Image Handling
     if uploaded_image:
         image_b64 = image_to_base64(uploaded_image)
         user_content.append({
             "type": "image_url",
             "image_url": {"url": f"data:image/png;base64,{image_b64}"}
         })
-
     # Save user message
-    messages.append({"role": "user", "content": user_content})
-    
-    # Force UI update to show user message immediately
-    with st.chat_message("user"):
-        st.markdown(user_prompt)
-        if uploaded_image:
-            st.image(uploaded_image, width=300)
-
+    messages.append({"role": "user", "content": user_content, "ts": datetime.now()})
     # Assistant response (streaming)
     with st.chat_message("assistant"):
         placeholder = st.empty()
         full_response = ""
-
-        try:
-            # Use the SELECTED model variable
-            completion = client.chat.completions.create(
-                model=st.session_state.selected_model,
-                messages=[
-                    {"role": "system", "content": "You are a professional, helpful AI assistant."},
-                    *messages
-                ],
-                temperature=0.7,
-                max_completion_tokens=1024,
-                stream=True
-            )
-
-            for chunk in completion:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    full_response += delta
-                    placeholder.markdown(full_response + "▌")
-            
-            placeholder.markdown(full_response)
-            messages.append({"role": "assistant", "content": [{"type": "text", "text": full_response}]})
-            
-        except Exception as e:
-            st.error(f"Error: {e}")
-            if "model_decommissioned" in str(e):
-                st.info("💡 Tip: Try switching the model in the Sidebar.")
-
+        completion = client.chat.completions.create(
+            model=st.session_state.model,
+            messages=[
+                {"role": "system", "content": st.session_state.system_prompt},
+                *messages
+            ],
+            temperature=st.session_state.temperature,
+            max_tokens=st.session_state.max_tokens,
+            stream=True
+        )
+        for chunk in completion:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                full_response += delta
+                placeholder.markdown(full_response)
+    messages.append({"role": "assistant", "content": [{"type": "text", "text": full_response}], "ts": datetime.now()})
     st.session_state.uploader_counter += 1
     st.rerun()
-
 st.markdown("</div>", unsafe_allow_html=True)
