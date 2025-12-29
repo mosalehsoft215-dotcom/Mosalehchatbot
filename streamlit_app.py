@@ -47,155 +47,286 @@ if "show_previews" not in st.session_state:
 # ==========================================================
 # HELPERS
 # ==========================================================
-def load_file_b64(path: Path) -> str | None:
+@st.cache_data(show_spinner=False)
+def _read_file_b64(path_str: str) -> str | None:
     try:
-        data = path.read_bytes()
+        data = Path(path_str).read_bytes()
         return base64.b64encode(data).decode("utf-8")
     except Exception:
         return None
+
+def load_file_b64(path: Path) -> str | None:
+    """Read a local file and return base64 (cached)."""
+    return _read_file_b64(str(path))
+
+def build_global_css(allow_starry: bool, bg_img_b64: str | None) -> str:
+    # Background CSS (kept as plain strings to avoid escaping issues)
+    if allow_starry and bg_img_b64:
+        bg_css = f"""
+        background-color: var(--ms-bg);
+        background-image: var(--ms-bg2), url("data:image/png;base64,{bg_img_b64}");
+        background-size: auto, cover;
+        background-position: center, center;
+        background-attachment: fixed;
+        """
+    else:
+        bg_css = """
+        background-color: var(--ms-bg);
+        background-image: var(--ms-bg2);
+        background-attachment: fixed;
+        """
+
+    return f"""
+    /* Page background + base typography */
+    .stApp {{
+      {bg_css}
+      color: var(--ms-text) !important;
+      font-family: var(--ms-font);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }}
+
+    /* Force readable text everywhere (Streamlit sometimes keeps light-theme colors) */
+    .stApp, .stApp p, .stApp li, .stApp label, .stApp span, .stApp div {{
+      color: var(--ms-text);
+    }}
+    .stCaption, .stMarkdown small {{
+      color: var(--ms-muted) !important;
+    }}
+
+    /* Content width + spacing */
+    section.main > div {{
+      max-width: 980px;
+      padding-top: 1.0rem;
+      padding-bottom: 1.2rem;
+    }}
+
+    /* Subtle top header */
+    .ms-topbar {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 0.5rem;
+    }}
+    .ms-brand {{
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }}
+    .ms-title {{
+      font-size: 1.35rem;
+      font-weight: 750;
+      letter-spacing: -0.02em;
+      color: var(--ms-text);
+    }}
+    .ms-subtitle {{
+      font-size: 0.92rem;
+      color: var(--ms-muted);
+      margin-top: -2px;
+    }}
+
+    /* Chat "card" */
+    .ms-card {{
+      background: var(--ms-card);
+      border: 1px solid var(--ms-border);
+      border-radius: 20px;
+      padding: 14px 14px 10px 14px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+    }}
+
+    /* Chat message bubbles (Streamlit structure: .stChatMessageContent) */
+    div[data-testid="stChatMessage"] {{
+      padding: 0.35rem 0.25rem;
+    }}
+
+    .stChatMessageContent {{
+      border-radius: 16px !important;
+      padding: 0.65rem 0.85rem !important;
+      border: 1px solid var(--ms-border) !important;
+      background: var(--ms-assistant-bg);
+    }}
+
+    /* Role-based bubbles (works on recent Streamlit versions) */
+    div[data-testid="stChatMessage"][aria-label*="user"] .stChatMessageContent {{
+      background: var(--ms-user-bg) !important;
+    }}
+    div[data-testid="stChatMessage"][aria-label*="assistant"] .stChatMessageContent {{
+      background: var(--ms-assistant-bg) !important;
+    }}
+
+    /* Code blocks */
+    pre {{
+      background: var(--ms-code-bg) !important;
+      border: 1px solid var(--ms-border) !important;
+      border-radius: 14px !important;
+      padding: 0.85rem !important;
+    }}
+
+    /* Chat input */
+    div[data-testid="stChatInput"] textarea {{
+      background: var(--ms-input-bg) !important;
+      color: var(--ms-text) !important;
+      border-radius: 16px !important;
+      border: 1px solid var(--ms-border) !important;
+    }}
+    div[data-testid="stChatInput"] textarea::placeholder {{
+      color: var(--ms-muted) !important;
+    }}
+    div[data-testid="stChatInput"] {{
+      padding-top: 0.5rem;
+    }}
+
+    /* File uploader */
+    div[data-testid="stFileUploaderDropzone"] {{
+      background: var(--ms-input-bg) !important;
+      border: 1px dashed var(--ms-border) !important;
+      border-radius: 16px !important;
+    }}
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {{
+      background: var(--ms-card) !important;
+      border-right: 1px solid var(--ms-border) !important;
+    }}
+    [data-testid="stSidebar"] > div {{
+      padding-top: 1.0rem;
+    }}
+
+    /* Buttons */
+    .stButton > button {{
+      background: var(--ms-input-bg) !important;
+      color: var(--ms-text) !important;
+      border: 1px solid var(--ms-border) !important;
+      border-radius: 14px !important;
+      padding: 0.55rem 0.8rem !important;
+    }}
+    .stButton > button:hover {{
+      filter: brightness(1.03);
+    }}
+
+    /* Reduce Streamlit default top padding a bit */
+    header[data-testid="stHeader"] {{
+      background: transparent;
+    }}
+    """
+
 def apply_ui(theme_mode: str, starry_bg: bool, wrap_code: bool) -> None:
     """
-    Streamlit doesn't have a first-class runtime theme switch for custom UIs,
-    so we style the app with CSS.
+    Light/Dark/System runtime theme via CSS variables.
+    Fixes dark-mode readability (global text color + correct chat selectors).
     """
-    is_dark = theme_mode == "Dark"
-    use_custom = theme_mode in ("Light", "Dark")
-    bg_img_b64 = None
-    if is_dark and starry_bg:
-        bg_path = Path(__file__).parent / "assets" / "space_bg.png"
-        bg_img_b64 = load_file_b64(bg_path)
-    # Backgrounds
-    if not use_custom:
-        # System: leave Streamlit defaults, only apply small polish
-        base_bg = ""
-        card_bg = "rgba(255,255,255,0.75)"
-        text = ""
-        muted = ""
-        border = "rgba(0,0,0,0.08)"
-    else:
-        if is_dark:
-            base_bg = "#070A12"
-            card_bg = "rgba(18, 24, 38, 0.72)"
-            text = "#E8EEF8"
-            muted = "rgba(232, 238, 248, 0.72)"
-            border = "rgba(255,255,255,0.10)"
-        else:
-            base_bg = "#F6F7FB"
-            card_bg = "rgba(255, 255, 255, 0.80)"
-            text = "#0E1222"
-            muted = "rgba(14, 18, 34, 0.65)"
-            border = "rgba(14,18,34,0.10)"
-    bg_css = ""
-    if use_custom:
-        if bg_img_b64:
-            bg_css = f"""
-            background-color: {base_bg};
-            background-image:
-              radial-gradient(1200px 700px at 20% 5%, rgba(120,130,255,0.22), transparent 60%),
-              radial-gradient(900px 500px at 90% 15%, rgba(255,90,160,0.14), transparent 55%),
-              url("data:image/png;base64,{bg_img_b64}");
-            background-size: auto, auto, cover;
-            background-position: center, center, center;
-            background-attachment: fixed;
-            """
-        else:
-            bg_css = f"""
-            background-color: {base_bg};
-            background-image:
-              radial-gradient(1200px 700px at 20% 5%, rgba(120,130,255,0.22), transparent 60%),
-              radial-gradient(900px 500px at 90% 15%, rgba(255,90,160,0.14), transparent 55%);
-            background-attachment: fixed;
-            """
+    LIGHT = {
+        "bg": "#F6F7FB",
+        "bg2": "radial-gradient(900px 520px at 20% 0%, rgba(99,102,241,0.14), transparent 55%),"
+               "radial-gradient(800px 460px at 95% 10%, rgba(236,72,153,0.12), transparent 55%)",
+        "card": "rgba(255,255,255,0.86)",
+        "border": "rgba(15,23,42,0.10)",
+        "text": "#0B1220",
+        "muted": "rgba(11,18,32,0.62)",
+        "user_bg": "rgba(99,102,241,0.16)",
+        "assistant_bg": "rgba(2,6,23,0.04)",
+        "input_bg": "rgba(255,255,255,0.92)",
+        "code_bg": "rgba(2,6,23,0.06)",
+    }
+    DARK = {
+        "bg": "#070A12",
+        "bg2": "radial-gradient(1200px 700px at 20% 5%, rgba(120,130,255,0.20), transparent 60%),"
+               "radial-gradient(900px 520px at 90% 15%, rgba(255,90,160,0.14), transparent 55%)",
+        "card": "rgba(17,24,39,0.74)",
+        "border": "rgba(255,255,255,0.12)",
+        "text": "#EAF0FF",
+        "muted": "rgba(234,240,255,0.70)",
+        "user_bg": "rgba(99,102,241,0.24)",
+        "assistant_bg": "rgba(255,255,255,0.06)",
+        "input_bg": "rgba(17,24,39,0.88)",
+        "code_bg": "rgba(255,255,255,0.08)",
+    }
+
     code_wrap_css = ""
     if wrap_code:
-        code_wrap_css = """
-        pre code { white-space: pre-wrap !important; word-break: break-word !important; }
+        code_wrap_css = "pre code { white-space: pre-wrap !important; word-break: break-word !important; }"
+
+    # In System mode we follow the OS theme using prefers-color-scheme
+    if theme_mode == "System":
+        css = f"""
+        <style>
+          :root {{
+            --ms-font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+          }}
+
+          /* Light defaults */
+          .stApp {{
+            --ms-bg: {LIGHT["bg"]};
+            --ms-bg2: {LIGHT["bg2"]};
+            --ms-card: {LIGHT["card"]};
+            --ms-border: {LIGHT["border"]};
+            --ms-text: {LIGHT["text"]};
+            --ms-muted: {LIGHT["muted"]};
+            --ms-user-bg: {LIGHT["user_bg"]};
+            --ms-assistant-bg: {LIGHT["assistant_bg"]};
+            --ms-input-bg: {LIGHT["input_bg"]};
+            --ms-code-bg: {LIGHT["code_bg"]};
+          }}
+
+          @media (prefers-color-scheme: dark) {{
+            .stApp {{
+              --ms-bg: {DARK["bg"]};
+              --ms-bg2: {DARK["bg2"]};
+              --ms-card: {DARK["card"]};
+              --ms-border: {DARK["border"]};
+              --ms-text: {DARK["text"]};
+              --ms-muted: {DARK["muted"]};
+              --ms-user-bg: {DARK["user_bg"]};
+              --ms-assistant-bg: {DARK["assistant_bg"]};
+              --ms-input-bg: {DARK["input_bg"]};
+              --ms-code-bg: {DARK["code_bg"]};
+            }}
+          }}
+
+          {code_wrap_css}
+          {build_global_css(allow_starry=False, bg_img_b64=None)}
+        </style>
         """
+        st.markdown(css, unsafe_allow_html=True)
+        return
+
+    # Light/Dark explicit
+    P = DARK if theme_mode == "Dark" else LIGHT
+
+    # Starry background only in Dark mode (and only if file exists)
+    bg_img_b64 = None
+    allow_starry = False
+    if theme_mode == "Dark" and starry_bg:
+        # prefer assets/space_bg.png, fallback to ./space_bg.png (older repo layout)
+        p1 = Path(__file__).parent / "assets" / "space_bg.png"
+        p2 = Path(__file__).parent / "space_bg.png"
+        bg_img_b64 = load_file_b64(p1) or load_file_b64(p2)
+        allow_starry = bg_img_b64 is not None
+
     css = f"""
     <style>
-      /* Page background */
+      :root {{
+        --ms-font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      }}
+
       .stApp {{
-        {bg_css}
+        --ms-bg: {P["bg"]};
+        --ms-bg2: {P["bg2"]};
+        --ms-card: {P["card"]};
+        --ms-border: {P["border"]};
+        --ms-text: {P["text"]};
+        --ms-muted: {P["muted"]};
+        --ms-user-bg: {P["user_bg"]};
+        --ms-assistant-bg: {P["assistant_bg"]};
+        --ms-input-bg: {P["input_bg"]};
+        --ms-code-bg: {P["code_bg"]};
       }}
-      /* Content width + spacing */
-      section.main > div {{
-        max-width: 980px;
-        padding-top: 1.0rem;
-        padding-bottom: 1.2rem;
-      }}
-      /* Subtle top header */
-      .ms-topbar {{
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 0.5rem;
-      }}
-      .ms-brand {{
-        display: flex;
-        align-items: baseline;
-        gap: 10px;
-      }}
-      .ms-title {{
-        font-size: 1.35rem;
-        font-weight: 750;
-        letter-spacing: -0.02em;
-        color: {text if use_custom else 'inherit'};
-      }}
-      .ms-subtitle {{
-        font-size: 0.92rem;
-        color: {muted if use_custom else 'inherit'};
-        margin-top: -2px;
-      }}
-      /* Chat "card" */
-      .ms-card {{
-        background: {card_bg};
-        border: 1px solid {border};
-        border-radius: 20px;
-        padding: 14px 14px 10px 14px;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        box-shadow: 0 10px 30px rgba(0,0,0,0.10);
-      }}
-      /* Chat message bubbles */
-      div[data-testid="stChatMessage"] {{
-        padding: 0.35rem 0.25rem;
-      }}
-      div[data-testid="stChatMessage"] > div {{
-        border-radius: 16px;
-        padding: 0.55rem 0.75rem;
-      }}
-      /* user bubble */
-      div[data-testid="stChatMessage"][data-role="user"] > div {{
-        border: 1px solid {border};
-        background: rgba(120,130,255,0.12);
-      }}
-      /* assistant bubble */
-      div[data-testid="stChatMessage"][data-role="assistant"] > div {{
-        border: 1px solid {border};
-        background: rgba(255,255,255,0.04);
-      }}
-      /* Chat input */
-      div[data-testid="stChatInput"] textarea {{
-        border-radius: 16px !important;
-        border: 1px solid {border} !important;
-      }}
-      div[data-testid="stChatInput"] {{
-        padding-top: 0.5rem;
-      }}
-      /* File uploader card */
-      .ms-uploader {{
-        margin-top: 0.65rem;
-      }}
-      /* Sidebar polish */
-      [data-testid="stSidebar"] > div {{
-        padding-top: 1.0rem;
-      }}
-      /* Reduce Streamlit default top padding a bit */
-      header[data-testid="stHeader"] {{
-        background: transparent;
-      }}
+
       {code_wrap_css}
+      {build_global_css(allow_starry=allow_starry, bg_img_b64=bg_img_b64)}
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
